@@ -1,0 +1,102 @@
+#
+# Initial steps to implement event sourcing
+
+service: aws-es-example # NOTE: update this with your service name
+
+provider:
+  name: aws
+  runtime: nodejs10.x
+  environment:
+    COMMANDS_TABLE: ${self:service}-commands-${opt:stage, self:provider.stage}
+    EVENTS_TABLE: ${self:service}-all-events-${opt:stage, self:provider.stage}    
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - dynamodb:PutItem
+        - dynamodb:UpdateItem
+
+        - dynamodb:GetRecords
+        - dynamodb:GetShardIterator
+        - dynamodb:DescribeStream
+        - dynamodb:ListStreams        
+
+      Resource: "arn:aws:dynamodb:${opt:region, self:provider.region}:*:table/${self:provider.environment.COMMANDS_TABLE}"
+
+    - Effect: Allow
+      Action:
+        - dynamodb:GetItem      
+        - dynamodb:PutItem
+        - dynamodb:UpdateItem
+        - dynamodb:Scan     
+
+      Resource: "arn:aws:dynamodb:${opt:region, self:provider.region}:*:table/${self:provider.environment.EVENTS_TABLE}"
+
+functions:
+  example:
+    handler: handler.example
+    events:
+      - stream:
+          type: dynamodb
+          batchSize: 1
+          startingPosition: LATEST
+          arn:
+            Fn::GetAtt:
+              - CommandsDynamoDbTable
+              - StreamArn
+
+
+  addCommand:
+    handler: handler.addCommand
+    events:
+      - http:
+          path: command
+          method: post
+          cors: true
+  hello:
+    handler: handler.hello
+    events:
+      - http:
+          path: hello
+          method: get    
+
+resources:
+  Resources:
+    CommandsDynamoDbTable:
+      Type: 'AWS::DynamoDB::Table'
+      Properties:
+        AttributeDefinitions:
+          -
+            AttributeName: microservice
+            AttributeType: S
+        KeySchema:
+          -
+            AttributeName: microservice
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        TableName: ${self:provider.environment.COMMANDS_TABLE}
+        StreamSpecification:
+          StreamViewType: NEW_IMAGE
+
+    EventsDynamoDbTable:
+      Type: 'AWS::DynamoDB::Table'
+      Properties:
+        AttributeDefinitions:
+          -
+            AttributeName: microservice
+            AttributeType: S
+          -
+            AttributeName: sequenceNumber
+            AttributeType: S            
+        KeySchema:
+          -
+            AttributeName: microservice
+            KeyType: HASH
+          -
+            AttributeName: sequenceNumber
+            KeyType: RANGE            
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        TableName: ${self:provider.environment.EVENTS_TABLE}                    
